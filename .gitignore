@@ -1,0 +1,8 @@
+.DS_Store
+.venv/
+__pycache__/
+artifacts/
+*.pt
+*.mp4
+*.zip
+plate-indo-dataset2026/

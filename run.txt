@@ -1,0 +1,8 @@
+source .venv/bin/activate
+python inference_cctv.py \
+  --model best.pt \
+  --video "cctv.mp4" \
+  --out-video artifacts/cctv_plate_annotated.mp4 \
+  --out-csv artifacts/cctv_plate_ocr_log.csv \
+  --evidence-dir artifacts/evidence_frames \
+  --conf 0.35 --iou 0.5
