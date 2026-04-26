@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Plate Detection Live Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <div class="bg-glow bg-glow-1"></div>
+  <div class="bg-glow bg-glow-2"></div>
+
+  <main class="container">
+    <header class="topbar glass">
+      <div>
+        <p class="eyebrow">Localhost Monitoring</p>
+        <h1>Live CCTV Plate Recognition</h1>
+      </div>
+      <div class="status-badge" id="connectionBadge">Menyambungkan...</div>
+    </header>
+
+    <section class="controls glass">
+      <label for="streamUrl">Sumber Stream (M3U8)</label>
+      <div class="control-row">
+        <input id="streamUrl" type="text" value="{{ stream_url }}" />
+        <button id="applyBtn">Terapkan</button>
+      </div>
+      <p class="hint">Tips: biarkan default jika ingin langsung pakai stream Kediri.</p>
+    </section>
+
+    <section class="grid">
+      <article class="video-card glass">
+        <img id="videoFeed" src="{{ url_for('video_feed') }}" alt="Live detection stream" />
+      </article>
+
+      <aside class="panel glass">
+        <h2>Status Sistem</h2>
+        <div class="stats">
+          <div class="stat"><span>FPS</span><strong id="fpsValue">-</strong></div>
+          <div class="stat"><span>Frame</span><strong id="frameValue">-</strong></div>
+          <div class="stat"><span>Uptime</span><strong id="uptimeValue">-</strong></div>
+          <div class="stat"><span>Last Update</span><strong id="lastUpdateValue">-</strong></div>
+          <div class="stat"><span>Total Deteksi</span><strong id="rawDetValue">-</strong></div>
+          <div class="stat"><span>OCR Sukses</span><strong id="ocrOkValue">-</strong></div>
+        </div>
+
+        <div class="panel-head">
+          <h3>Plat Terdeteksi (Terbaru)</h3>
+          <button id="showAllBtn" class="btn-secondary" type="button">Lihat Semua</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Waktu</th>
+                <th>Kelas</th>
+                <th>Plat</th>
+                <th>Det</th>
+                <th>OCR</th>
+              </tr>
+            </thead>
+            <tbody id="detectionRows">
+              <tr><td colspan="5" class="empty">Belum ada data</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="error" id="errorText"></p>
+      </aside>
+    </section>
+  </main>
+
+  <div id="allDetectionsModal" class="modal hidden">
+    <div class="modal-backdrop" data-close="all"></div>
+    <div class="modal-card glass">
+      <div class="modal-head">
+        <h3>Semua Data Deteksi</h3>
+        <button class="modal-close" data-close="all" type="button">Tutup</button>
+      </div>
+      <div class="table-wrap modal-table">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Waktu</th>
+              <th>Frame</th>
+              <th>Kelas</th>
+              <th>Plat</th>
+              <th>Det</th>
+              <th>OCR</th>
+              <th>Aksi</th>
+            </tr>
+          </thead>
+          <tbody id="allDetectionRows">
+            <tr><td colspan="8" class="empty">Belum ada data</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="detailModal" class="modal hidden">
+    <div class="modal-backdrop" data-close="detail"></div>
+    <div class="modal-card modal-detail glass">
+      <div class="modal-head">
+        <h3>Detail Deteksi</h3>
+        <button class="modal-close" data-close="detail" type="button">Tutup</button>
+      </div>
+      <div class="detail-grid">
+        <div class="detail-img-wrap">
+          <img id="detailCropImage" alt="Crop plat deteksi" />
+        </div>
+        <div class="detail-data" id="detailData"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const statusBadge = document.getElementById('connectionBadge');
+    const fpsValue = document.getElementById('fpsValue');
+    const frameValue = document.getElementById('frameValue');
+    const uptimeValue = document.getElementById('uptimeValue');
+    const lastUpdateValue = document.getElementById('lastUpdateValue');
+    const rawDetValue = document.getElementById('rawDetValue');
+    const ocrOkValue = document.getElementById('ocrOkValue');
+    const detectionRows = document.getElementById('detectionRows');
+    const errorText = document.getElementById('errorText');
+    const streamUrlInput = document.getElementById('streamUrl');
+    const applyBtn = document.getElementById('applyBtn');
+    const showAllBtn = document.getElementById('showAllBtn');
+    const allDetectionsModal = document.getElementById('allDetectionsModal');
+    const allDetectionRows = document.getElementById('allDetectionRows');
+    const detailModal = document.getElementById('detailModal');
+    const detailCropImage = document.getElementById('detailCropImage');
+    const detailData = document.getElementById('detailData');
+
+    function formatUptime(seconds) {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    function renderRows(items) {
+      if (!items || items.length === 0) {
+        detectionRows.innerHTML = '<tr><td colspan="5" class="empty">Belum ada data</td></tr>';
+        return;
+      }
+
+      detectionRows.innerHTML = items.map((item) => `
+        <tr>
+          <td>${item.time}</td>
+          <td>${item.class_name || '-'}</td>
+          <td class="plate">${item.plate}</td>
+          <td>${item.det_conf}</td>
+          <td>${item.ocr_conf}</td>
+        </tr>
+      `).join('');
+    }
+
+    function openModal(node) {
+      node.classList.remove('hidden');
+    }
+
+    function closeModal(node) {
+      node.classList.add('hidden');
+    }
+
+    function renderAllRows(items) {
+      if (!items || items.length === 0) {
+        allDetectionRows.innerHTML = '<tr><td colspan="8" class="empty">Belum ada data</td></tr>';
+        return;
+      }
+
+      allDetectionRows.innerHTML = items.map((item) => `
+        <tr>
+          <td>${item.id}</td>
+          <td>${item.time || '-'}</td>
+          <td>${item.frame_idx ?? '-'}</td>
+          <td>${item.class_name || '-'}</td>
+          <td class="plate">${item.plate || '-'}</td>
+          <td>${item.det_conf ?? '-'}</td>
+          <td>${item.ocr_conf ?? '-'}</td>
+          <td><button class="btn-detail" data-detail-id="${item.id}" type="button">Detail</button></td>
+        </tr>
+      `).join('');
+    }
+
+    async function loadAllDetections() {
+      const res = await fetch('/api/detections?limit=300');
+      const data = await res.json();
+      renderAllRows(data.items || []);
+    }
+
+    async function loadDetail(detId) {
+      const res = await fetch(`/api/detections/${detId}`);
+      if (!res.ok) {
+        throw new Error('Data detail tidak ditemukan.');
+      }
+      const data = await res.json();
+      const item = data.item || {};
+
+      detailCropImage.src = item.crop_image || '';
+      detailData.innerHTML = `
+        <div class="detail-row"><span>ID</span><strong>${item.id ?? '-'}</strong></div>
+        <div class="detail-row"><span>Waktu</span><strong>${item.time || '-'}</strong></div>
+        <div class="detail-row"><span>Frame</span><strong>${item.frame_idx ?? '-'}</strong></div>
+        <div class="detail-row"><span>Kelas</span><strong>${item.class_name || '-'}</strong></div>
+        <div class="detail-row"><span>Plat</span><strong>${item.plate || '-'}</strong></div>
+        <div class="detail-row"><span>Deteksi</span><strong>${item.det_conf ?? '-'}</strong></div>
+        <div class="detail-row"><span>OCR</span><strong>${item.ocr_conf ?? '-'}</strong></div>
+      `;
+      openModal(detailModal);
+    }
+
+    async function loadStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+
+        statusBadge.textContent = data.connected ? 'Live Tersambung' : 'Tidak Tersambung';
+        statusBadge.classList.toggle('offline', !data.connected);
+
+        fpsValue.textContent = data.fps ?? '-';
+        frameValue.textContent = data.frame_idx ?? '-';
+        uptimeValue.textContent = formatUptime(data.uptime_sec || 0);
+        lastUpdateValue.textContent = data.last_update || '-';
+        rawDetValue.textContent = data.raw_det_count ?? 0;
+        ocrOkValue.textContent = data.ocr_success_count ?? 0;
+        streamUrlInput.value = data.stream_url || streamUrlInput.value;
+
+        renderRows(data.detections || []);
+        errorText.textContent = data.last_error || '';
+      } catch (err) {
+        statusBadge.textContent = 'Status Error';
+        statusBadge.classList.add('offline');
+        errorText.textContent = 'Gagal mengambil status server.';
+      }
+    }
+
+    applyBtn.addEventListener('click', async () => {
+      const stream_url = streamUrlInput.value.trim();
+      if (!stream_url) return;
+
+      applyBtn.disabled = true;
+      applyBtn.textContent = 'Memproses...';
+      try {
+        const res = await fetch('/api/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stream_url }),
+        });
+
+        if (!res.ok) {
+          const payload = await res.json();
+          throw new Error(payload.error || 'Gagal update stream');
+        }
+      } catch (err) {
+        errorText.textContent = err.message;
+      } finally {
+        applyBtn.disabled = false;
+        applyBtn.textContent = 'Terapkan';
+      }
+    });
+
+    showAllBtn.addEventListener('click', async () => {
+      try {
+        await loadAllDetections();
+        openModal(allDetectionsModal);
+      } catch (err) {
+        errorText.textContent = 'Gagal mengambil semua data deteksi.';
+      }
+    });
+
+    allDetectionRows.addEventListener('click', async (evt) => {
+      const btn = evt.target.closest('button[data-detail-id]');
+      if (!btn) return;
+      const detId = btn.getAttribute('data-detail-id');
+      if (!detId) return;
+      try {
+        await loadDetail(detId);
+      } catch (err) {
+        errorText.textContent = err.message;
+      }
+    });
+
+    document.addEventListener('click', (evt) => {
+      const closeKey = evt.target?.getAttribute?.('data-close');
+      if (closeKey === 'all') {
+        closeModal(allDetectionsModal);
+      } else if (closeKey === 'detail') {
+        closeModal(detailModal);
+      }
+    });
+
+    loadStatus();
+    setInterval(loadStatus, 1000);
+  </script>
+</body>
+</html>

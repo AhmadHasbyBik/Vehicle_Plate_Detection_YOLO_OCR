@@ -1,4 +1,5 @@
 import os
+import re
 import cv2
 import time
 import ssl
@@ -25,21 +26,50 @@ def normalize_plate_text(text):
     return "".join(ch for ch in text.upper() if ch.isalnum())
 
 
-def read_plate_text(reader, crop_bgr, min_conf=0.25):
+def normalize_plate_candidate(text, min_chars=3):
+    txt = normalize_plate_text(text)
+    if len(txt) < min_chars:
+        return ""
+    return re.sub(r"[^A-Z0-9]", "", txt)
+
+
+def read_plate_text(reader, crop_bgr, min_conf=0.15):
     if crop_bgr is None or crop_bgr.size == 0:
         return "", 0.0
 
     gray = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY)
     gray = cv2.equalizeHist(gray)
-    results = reader.readtext(gray)
+    h, w = gray.shape[:2]
+    if h < 40 or w < 120:
+        gray = cv2.resize(gray, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_CUBIC)
 
     best_text = ""
     best_conf = 0.0
-    for _, txt, conf in results:
-        txt_norm = normalize_plate_text(txt)
-        if conf > best_conf and len(txt_norm) >= 4:
-            best_text = txt_norm
-            best_conf = float(conf)
+    candidates = [
+        gray,
+        cv2.GaussianBlur(gray, (3, 3), 0),
+        cv2.adaptiveThreshold(
+            gray,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            31,
+            5,
+        ),
+    ]
+
+    for candidate in candidates:
+        results = reader.readtext(
+            candidate,
+            allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+            paragraph=False,
+            detail=1,
+        )
+        for _, txt, conf in results:
+            txt_norm = normalize_plate_candidate(txt, min_chars=3)
+            if conf > best_conf and txt_norm:
+                best_text = txt_norm
+                best_conf = float(conf)
 
     if best_conf < min_conf:
         return "", best_conf
@@ -61,7 +91,7 @@ def run_inference(
     output_video_path,
     output_csv_path,
     evidence_dir,
-    conf_thres=0.35,
+    conf_thres=0.22,
     iou_thres=0.5,
     ocr_lang="en",
     ocr_gpu=True,
@@ -113,7 +143,18 @@ def run_inference(
                 cls_id = int(clss[i])
                 cls_name = detector.names.get(cls_id, str(cls_id))
 
-                x1, y1, x2, y2 = clamp_bbox(int(x1), int(y1), int(x2), int(y2), width, height)
+                bw = max(1, int(x2 - x1))
+                bh = max(1, int(y2 - y1))
+                pad_x = int(0.12 * bw)
+                pad_y = int(0.22 * bh)
+                x1, y1, x2, y2 = clamp_bbox(
+                    int(x1) - pad_x,
+                    int(y1) - pad_y,
+                    int(x2) + pad_x,
+                    int(y2) + pad_y,
+                    width,
+                    height,
+                )
                 crop = frame[y1:y2, x1:x2].copy()
                 plate_text, ocr_conf = read_plate_text(reader, crop)
                 t_sec = frame_idx / max(fps, 1e-6)
@@ -187,7 +228,7 @@ def main():
     parser.add_argument("--out-video", default="artifacts/cctv_plate_annotated.mp4")
     parser.add_argument("--out-csv", default="artifacts/cctv_plate_ocr_log.csv")
     parser.add_argument("--evidence-dir", default="artifacts/evidence_frames")
-    parser.add_argument("--conf", type=float, default=0.35)
+    parser.add_argument("--conf", type=float, default=0.22)
     parser.add_argument("--iou", type=float, default=0.5)
     parser.add_argument("--ocr-lang", default="en")
     parser.add_argument("--ocr-gpu", action="store_true")

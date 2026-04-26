@@ -1,0 +1,6 @@
+flask>=3.0.0
+opencv-python>=4.10.0
+ultralytics>=8.3.0
+easyocr>=1.7.2
+certifi>=2024.8.30
+numpy>=1.26.0
