@@ -14,29 +14,24 @@ pip install -r requirements.txt
 DETECT_EVERY_N=2 PROCESS_WIDTH=960 CONF_THRES=0.22 python app.py
 ```
 
-### Windows (PowerShell)
+### Windows - cara tercepat (venv otomatis)
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+Klik dua kali `run_windows.bat`, atau dari terminal:
 
-$env:DETECT_EVERY_N="2"; $env:PROCESS_WIDTH="960"; $env:CONF_THRES="0.22"
-python app.py
+```bat
+run_windows.bat
 ```
 
-Jika PowerShell menolak menjalankan script aktivasi, sekali saja:
+Script ini membuat `.venv` kalau belum ada, install dependency ke dalamnya, lalu menjalankan
+`app.py` memakai `.venv\Scripts\python.exe`. Tidak butuh aktivasi, jadi **tidak kena error
+ExecutionPolicy**. Ubah `DETECT_EVERY_N` / `PROCESS_WIDTH` / `CONF_THRES` langsung di dalam file `.bat`.
 
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-```
-
-### Windows (Command Prompt / cmd)
+### Windows - manual (Command Prompt / cmd)
 
 ```bat
 python -m venv .venv
 .venv\Scripts\activate.bat
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 
 set DETECT_EVERY_N=2
 set PROCESS_WIDTH=960
@@ -44,12 +39,42 @@ set CONF_THRES=0.22
 python app.py
 ```
 
+### Windows - manual (PowerShell)
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+
+$env:DETECT_EVERY_N="2"; $env:PROCESS_WIDTH="960"; $env:CONF_THRES="0.22"
+python app.py
+```
+
+Kalau muncul `Activate.ps1 cannot be loaded because running scripts is disabled on this system`,
+jalankan salah satu:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned   # permanen untuk user ini
+Set-ExecutionPolicy -Scope Process Bypass             # hanya untuk jendela terminal ini
+```
+
+Atau lewati aktivasi dan panggil python venv langsung:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe app.py
+```
+
 Catatan Windows:
+- Pastikan venv benar-benar aktif sebelum `pip install`. Kalau aktivasi gagal, `pip` akan memasang
+  paket ke Python global, bukan ke `.venv`. Cek dengan `python -c "import sys; print(sys.prefix)"` —
+  hasilnya harus menunjuk ke folder `.venv` proyek ini.
 - Env var **tidak bisa** ditulis di depan perintah (`VAR=1 python app.py` hanya jalan di bash/zsh) — pakai `set` / `$env:` seperti di atas.
-- `pip install -r requirements.txt` otomatis menarik PyTorch versi CPU. Untuk GPU NVIDIA, install torch CUDA dulu, baru requirements:
+- `pip install -r requirements.txt` otomatis menarik PyTorch versi CPU (unduhan ±2 GB saat venv baru).
+  Untuk GPU NVIDIA, install torch CUDA dulu, baru requirements:
   ```powershell
-  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-  pip install -r requirements.txt
+  python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+  python -m pip install -r requirements.txt
   ```
   lalu jalankan dengan `$env:OCR_GPU="true"`.
 
@@ -94,7 +119,8 @@ python inference_cctv.py \
 
 ### Windows (PowerShell)
 
-Pemisah baris pakai backtick `` ` ``, bukan `\`:
+Pemisah baris pakai backtick `` ` ``, bukan `\`. Tanpa aktivasi, ganti `python` dengan
+`.\.venv\Scripts\python.exe`:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
