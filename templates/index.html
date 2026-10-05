@@ -23,12 +23,21 @@
     </header>
 
     <section class="controls glass">
-      <label for="streamUrl">Sumber Stream (M3U8)</label>
+      <label for="cameraSelect">Kamera</label>
+      <div class="control-row">
+        <select id="cameraSelect">
+          {% for cam in cameras %}
+          <option value="{{ cam.url }}" {% if cam.url == stream_url %}selected{% endif %}>{{ cam.name }}</option>
+          {% endfor %}
+          <option value="">URL lain (isi manual)...</option>
+        </select>
+      </div>
+      <label for="streamUrl" class="label-gap">Sumber Stream (M3U8 / RTSP / file video)</label>
       <div class="control-row">
         <input id="streamUrl" type="text" value="{{ stream_url }}" />
         <button id="applyBtn">Terapkan</button>
       </div>
-      <p class="hint">Tips: biarkan default jika ingin langsung pakai stream Kediri.</p>
+      <p class="hint">Kamera ANPR Jogja (1280x720, menghadap lajur) memberi plat paling jelas. Kamera ATCS Kediri hanya 704x576 dengan sudut lebar, sehingga plat terlalu kecil untuk dibaca.</p>
     </section>
 
     <section class="grid">
@@ -43,8 +52,11 @@
           <div class="stat"><span>Frame</span><strong id="frameValue">-</strong></div>
           <div class="stat"><span>Uptime</span><strong id="uptimeValue">-</strong></div>
           <div class="stat"><span>Last Update</span><strong id="lastUpdateValue">-</strong></div>
-          <div class="stat"><span>Total Deteksi</span><strong id="rawDetValue">-</strong></div>
-          <div class="stat"><span>OCR Sukses</span><strong id="ocrOkValue">-</strong></div>
+          <div class="stat"><span>Total Deteksi (frame)</span><strong id="rawDetValue">-</strong></div>
+          <div class="stat"><span>OCR Sukses (frame)</span><strong id="ocrOkValue">-</strong></div>
+          <div class="stat"><span>Kendaraan Terbaca</span><strong id="vehicleValue">-</strong></div>
+          <div class="stat"><span>Resolusi Kamera</span><strong id="resolutionValue">-</strong></div>
+          <div class="stat stat-wide"><span>OCR / Enhancement</span><strong id="engineValue">-</strong></div>
         </div>
 
         <div class="panel-head">
@@ -55,15 +67,14 @@
           <table>
             <thead>
               <tr>
-                <th>Waktu</th>
-                <th>Kelas</th>
+                <th>Gambar</th>
                 <th>Plat</th>
-                <th>Det</th>
+                <th>Waktu</th>
                 <th>OCR</th>
               </tr>
             </thead>
             <tbody id="detectionRows">
-              <tr><td colspan="5" class="empty">Belum ada data</td></tr>
+              <tr><td colspan="4" class="empty">Belum ada data</td></tr>
             </tbody>
           </table>
         </div>
@@ -84,17 +95,18 @@
           <thead>
             <tr>
               <th>ID</th>
+              <th>Gambar</th>
+              <th>Plat</th>
               <th>Waktu</th>
               <th>Frame</th>
-              <th>Kelas</th>
-              <th>Plat</th>
               <th>Det</th>
               <th>OCR</th>
+              <th>Dibaca</th>
               <th>Aksi</th>
             </tr>
           </thead>
           <tbody id="allDetectionRows">
-            <tr><td colspan="8" class="empty">Belum ada data</td></tr>
+            <tr><td colspan="9" class="empty">Belum ada data</td></tr>
           </tbody>
         </table>
       </div>
@@ -109,8 +121,21 @@
         <button class="modal-close" data-close="detail" type="button">Tutup</button>
       </div>
       <div class="detail-grid">
-        <div class="detail-img-wrap">
-          <img id="detailCropImage" alt="Crop plat deteksi" />
+        <div class="detail-images">
+          <figure class="detail-img-wrap">
+            <img id="detailCropImage" alt="Plat hasil enhancement" />
+            <figcaption id="detailCropCaption">Hasil enhancement (super-resolution x4)</figcaption>
+          </figure>
+          <div class="detail-img-row">
+            <figure class="detail-img-wrap small">
+              <img id="detailRawImage" alt="Crop asli dari kamera" class="pixelated" />
+              <figcaption>Crop asli dari kamera</figcaption>
+            </figure>
+            <figure class="detail-img-wrap small">
+              <img id="detailContextImage" alt="Konteks kendaraan" />
+              <figcaption>Konteks kendaraan</figcaption>
+            </figure>
+          </div>
         </div>
         <div class="detail-data" id="detailData"></div>
       </div>
@@ -125,6 +150,13 @@
     const lastUpdateValue = document.getElementById('lastUpdateValue');
     const rawDetValue = document.getElementById('rawDetValue');
     const ocrOkValue = document.getElementById('ocrOkValue');
+    const vehicleValue = document.getElementById('vehicleValue');
+    const resolutionValue = document.getElementById('resolutionValue');
+    const engineValue = document.getElementById('engineValue');
+    const cameraSelect = document.getElementById('cameraSelect');
+    const detailRawImage = document.getElementById('detailRawImage');
+    const detailContextImage = document.getElementById('detailContextImage');
+    const detailCropCaption = document.getElementById('detailCropCaption');
     const detectionRows = document.getElementById('detectionRows');
     const errorText = document.getElementById('errorText');
     const streamUrlInput = document.getElementById('streamUrl');
@@ -143,19 +175,31 @@
       return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     }
 
+    function thumbCell(item) {
+      return item.thumb
+        ? `<img class="thumb" src="${item.thumb}" alt="${item.plate}" />`
+        : '<span class="empty">-</span>';
+    }
+
+    let lastRowsKey = '';
     function renderRows(items) {
       if (!items || items.length === 0) {
-        detectionRows.innerHTML = '<tr><td colspan="5" class="empty">Belum ada data</td></tr>';
+        detectionRows.innerHTML = '<tr><td colspan="4" class="empty">Belum ada data</td></tr>';
+        lastRowsKey = '';
         return;
       }
 
+      // Hindari render ulang (dan kedipan gambar) kalau datanya tidak berubah.
+      const key = items.map((i) => `${i.id}:${i.plate}:${i.ocr_conf}:${i.thumb.length}`).join('|');
+      if (key === lastRowsKey) return;
+      lastRowsKey = key;
+
       detectionRows.innerHTML = items.map((item) => `
-        <tr>
-          <td>${item.time}</td>
-          <td>${item.class_name || '-'}</td>
+        <tr class="clickable" data-detail-id="${item.id}">
+          <td>${thumbCell(item)}</td>
           <td class="plate">${item.plate}</td>
-          <td>${item.det_conf}</td>
-          <td>${item.ocr_conf}</td>
+          <td>${item.time}</td>
+          <td>${item.ocr_conf ?? '-'}</td>
         </tr>
       `).join('');
     }
@@ -170,19 +214,20 @@
 
     function renderAllRows(items) {
       if (!items || items.length === 0) {
-        allDetectionRows.innerHTML = '<tr><td colspan="8" class="empty">Belum ada data</td></tr>';
+        allDetectionRows.innerHTML = '<tr><td colspan="9" class="empty">Belum ada data</td></tr>';
         return;
       }
 
       allDetectionRows.innerHTML = items.map((item) => `
         <tr>
           <td>${item.id}</td>
+          <td>${thumbCell(item)}</td>
+          <td class="plate">${item.plate || '-'}</td>
           <td>${item.time || '-'}</td>
           <td>${item.frame_idx ?? '-'}</td>
-          <td>${item.class_name || '-'}</td>
-          <td class="plate">${item.plate || '-'}</td>
           <td>${item.det_conf ?? '-'}</td>
           <td>${item.ocr_conf ?? '-'}</td>
+          <td>${item.reads ?? '-'}x</td>
           <td><button class="btn-detail" data-detail-id="${item.id}" type="button">Detail</button></td>
         </tr>
       `).join('');
@@ -203,14 +248,19 @@
       const item = data.item || {};
 
       detailCropImage.src = item.crop_image || '';
+      detailRawImage.src = item.raw_image || '';
+      detailContextImage.src = item.context_image || '';
+      detailCropCaption.textContent = `Hasil enhancement — ${engineValue.textContent}`;
       detailData.innerHTML = `
         <div class="detail-row"><span>ID</span><strong>${item.id ?? '-'}</strong></div>
         <div class="detail-row"><span>Waktu</span><strong>${item.time || '-'}</strong></div>
         <div class="detail-row"><span>Frame</span><strong>${item.frame_idx ?? '-'}</strong></div>
         <div class="detail-row"><span>Kelas</span><strong>${item.class_name || '-'}</strong></div>
-        <div class="detail-row"><span>Plat</span><strong>${item.plate || '-'}</strong></div>
+        <div class="detail-row"><span>Plat</span><strong class="plate plate-big">${item.plate || '-'}</strong></div>
         <div class="detail-row"><span>Deteksi</span><strong>${item.det_conf ?? '-'}</strong></div>
-        <div class="detail-row"><span>OCR</span><strong>${item.ocr_conf ?? '-'}</strong></div>
+        <div class="detail-row"><span>Konsistensi OCR (voting)</span><strong>${item.ocr_conf ?? '-'}</strong></div>
+        <div class="detail-row"><span>Dibaca</span><strong>${item.reads ?? '-'}x dari ${item.hits ?? '-'} frame</strong></div>
+        <div class="detail-row"><span>Lebar plat di kamera</span><strong>${item.plate_px ?? '-'} px</strong></div>
       `;
       openModal(detailModal);
     }
@@ -229,7 +279,12 @@
         lastUpdateValue.textContent = data.last_update || '-';
         rawDetValue.textContent = data.raw_det_count ?? 0;
         ocrOkValue.textContent = data.ocr_success_count ?? 0;
-        streamUrlInput.value = data.stream_url || streamUrlInput.value;
+        vehicleValue.textContent = data.vehicle_count ?? 0;
+        resolutionValue.textContent = data.resolution || '-';
+        engineValue.textContent = `${data.ocr_engine || '-'} · ${data.enhancer || '-'}`;
+        if (document.activeElement !== streamUrlInput) {
+          streamUrlInput.value = data.stream_url || streamUrlInput.value;
+        }
 
         renderRows(data.detections || []);
         errorText.textContent = data.last_error || '';
@@ -262,6 +317,26 @@
       } finally {
         applyBtn.disabled = false;
         applyBtn.textContent = 'Terapkan';
+      }
+    });
+
+    cameraSelect.addEventListener('change', () => {
+      if (cameraSelect.value) {
+        streamUrlInput.value = cameraSelect.value;
+        applyBtn.click();
+      } else {
+        streamUrlInput.focus();
+        streamUrlInput.select();
+      }
+    });
+
+    detectionRows.addEventListener('click', async (evt) => {
+      const row = evt.target.closest('tr[data-detail-id]');
+      if (!row) return;
+      try {
+        await loadDetail(row.getAttribute('data-detail-id'));
+      } catch (err) {
+        errorText.textContent = err.message;
       }
     });
 

@@ -32,9 +32,9 @@ if errorlevel 1 (
 )
 
 REM 3) Konfigurasi + jalankan (ubah nilai di bawah sesuai kebutuhan)
-set DETECT_EVERY_N=2
+set DETECT_EVERY_N=1
 set PROCESS_WIDTH=960
-set CONF_THRES=0.22
+set CONF_THRES=0.3
 set OCR_GPU=false
 
 echo [3/3] Menjalankan dashboard di http://localhost:5000

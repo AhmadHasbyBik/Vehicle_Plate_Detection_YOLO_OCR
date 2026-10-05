@@ -1,3 +1,3 @@
 source .venv/bin/activate
 pip install -r requirements.txt
-DETECT_EVERY_N=2 PROCESS_WIDTH=960 CONF_THRES=0.22 python app.py
+PROCESS_WIDTH=960 CONF_THRES=0.3 python app.py
